@@ -6,74 +6,81 @@ from rich.table import Table
 from rich.live import Live
 from rich.panel import Panel
 
-# Пути к скриптам ботов
-BOT_1_SCRIPT = "int/bot_pool.py"
-# BOT_2_SCRIPT = "bot2.py"
-
 # Консоль для вывода
 console = Console()
 
 
-def run_bot(script_name, status_queue):
-    """Запускает скрипт бота и отправляет статус в очередь."""
+def run_script(script_name, status_queue):
+    """Запускает скрипт и отправляет статус в очередь."""
     try:
-        status_queue.put((script_name, "Запущен"))
+        status_queue.put((script_name, "[yellow]Запуск[/yellow]"))
         process = subprocess.Popen(["python", script_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        status_queue.put((script_name, "[green]Работает[/green]"))
         while True:
             output = process.stdout.readline()
             if output == b"" and process.poll() is not None:
                 break
             if output:
-                status_queue.put((script_name, output.strip().decode("utf-8")))
-        status_queue.put((script_name, "Завершен"))
+                status_queue.put((script_name, f"[blue]{output.strip().decode('utf-8')}[/blue]"))
+        status_queue.put((script_name, "[red]Завершен[/red]"))
     except Exception as e:
-        status_queue.put((script_name, f"Ошибка: {e}"))
+        status_queue.put((script_name, f"[red]Ошибка: {e}[/red]"))
 
 
-def update_table(status_queue, table):
-    """Обновляет таблицу статусов."""
-    while not status_queue.empty():
-        script_name, status = status_queue.get()
-        if script_name == BOT_1_SCRIPT:
-            table.row(0, script_name, status)
-        # elif script_name == BOT_2_SCRIPT:
-        #     table.row(1, script_name, status)
+def status_monitor(status_queue, scripts):
+    """Отображает статус работы скриптов в виде таблицы."""
+    # Словарь для хранения статусов
+    status_dict = {script: "[yellow]Ожидание запуска[/yellow]" for script in scripts}
 
+    def generate_table():
+        """Генерирует таблицу на основе текущих статусов."""
+        table = Table(title="Статус скриптов", show_header=True, header_style="bold magenta")
+        table.add_column("Скрипт", style="cyan", width=30)
+        table.add_column("Статус", style="green", width=50)
+        for script, status in status_dict.items():
+            table.add_row(script, status)
+        return table
 
-def status_monitor(status_queue):
-    """Отображает статус работы ботов в виде таблицы."""
-    table = Table(title="Статус ботов", show_header=True, header_style="bold magenta")
-    table.add_column("Бот", style="cyan", width=20)
-    table.add_column("Статус", style="green", width=50)
-    table.add_row(BOT_1_SCRIPT, "Ожидание запуска")
-    # table.add_row(BOT_2_SCRIPT, "Ожидание запуска")
-
-    with Live(table, refresh_per_second=4) as live:
+    with Live(generate_table(), refresh_per_second=4) as live:
         while True:
-            update_table(status_queue, table)
-            live.update(table)
+            # Обновляем статусы
+            while not status_queue.empty():
+                script_name, status = status_queue.get()
+                status_dict[script_name] = status
+
+            # Обновляем таблицу
+            live.update(generate_table())
             time.sleep(0.25)
 
 
 if __name__ == "__main__":
+    # Список скриптов для запуска
+    scripts = [
+        "int/bot_pool.py",  # Пример бота
+        "other_script.py",  # Другой скрипт
+        "another_script.py"  # Еще один скрипт
+    ]
+
     # Очередь для передачи статуса
     status_queue = multiprocessing.Queue()
 
-    # Создаем процессы для каждого бота
-    process1 = multiprocessing.Process(target=run_bot, args=(BOT_1_SCRIPT, status_queue))
-    # process2 = multiprocessing.Process(target=run_bot, args=(BOT_2_SCRIPT, status_queue))
+    # Создаем процессы для каждого скрипта
+    processes = []
+    for script in scripts:
+        process = multiprocessing.Process(target=run_script, args=(script, status_queue))
+        processes.append(process)
 
     # Процесс для мониторинга статуса
-    monitor_process = multiprocessing.Process(target=status_monitor, args=(status_queue,))
+    monitor_process = multiprocessing.Process(target=status_monitor, args=(status_queue, scripts))
 
     # Запускаем процессы
-    process1.start()
-    # process2.start()
+    for process in processes:
+        process.start()
     monitor_process.start()
 
     # Ждем завершения процессов (если нужно)
-    process1.join()
-    # process2.join()
+    for process in processes:
+        process.join()
     monitor_process.join()
 
-    console.print(Panel("Все боты завершили работу.", style="bold green"))
+    console.print(Panel("Все скрипты завершили работу.", style="bold green"))
